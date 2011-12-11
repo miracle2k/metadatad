@@ -1,0 +1,7 @@
+Move to a different database; When using a simple key/value store directly,
+we should move to a different database file per data type, rather than
+implementing a custom scheme of index lists etc. as is the cas now.
+
+Kyoto Cabinet, Berkley DB are options.
+
+ZODB, Metakit
