@@ -10,6 +10,17 @@ import logging
 logging.basicConfig()
 
 
+class Root(persistent.Persistent):
+
+    table = 'roots'
+
+    def __init__(self, path):
+        self.path = path
+
+    def key(self):
+        return self.path
+
+
 class File(persistent.Persistent):
 
     table = 'files'
@@ -19,7 +30,7 @@ class File(persistent.Persistent):
         self.path = path
 
     def key(self):
-        return (self.root, self.path)
+        return (self.root.path, self.path)
 
     @property
     def filename(self):
@@ -64,6 +75,7 @@ class Database(object):
         self.files = self.root.setdefault(File.table, PersistentMapping())
         self.tracks = self.root.setdefault(Track.table, PersistentMapping())
         self.artists = self.root.setdefault(Artist.table, PersistentMapping())
+        self.roots = self.root.setdefault(Root.table, PersistentMapping())
 
     def set(self, object):
         self.root[object.table][object.key()] = object

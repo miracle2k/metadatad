@@ -11,6 +11,9 @@ dir_to_parse = sys.argv[1]
 
 database = db.Database()
 
+root = db.Root(dir_to_parse)
+database.set(root)
+
 counters = {'audio': 0}
 skipped = []
 no_mbdata = []
@@ -21,10 +24,9 @@ try:
             # relative to the base; the base concept can be used
             # to have multiple media file "root"s.
             fullpath = path.join(dirpath, filename)
-            base = dir_to_parse
-            relpath = path.relpath(fullpath, base)
+            relpath = path.relpath(fullpath, dir_to_parse)
 
-            dbfile = db.File(base, relpath)
+            dbfile = db.File(root, relpath)
 
             # For now, only process new files
             print 'Looking at', relpath,
