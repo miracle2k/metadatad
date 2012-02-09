@@ -30,11 +30,11 @@ class File(persistent.Persistent):
         self.path = path
 
     def key(self):
-        return (self.root.path, self.path)
+        return (self.root, self.path)
 
     @property
     def filename(self):
-        return path.join(self.root, self.path)
+        return path.join(self.root.path, self.path)
 
 
 class Artist(persistent.Persistent):
