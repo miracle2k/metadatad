@@ -1,9 +1,5 @@
 *.pyc
-
 /.idea/
 
 /BRANCH_TODO
 
-# Development data / demo files
-/data/
-/files/
