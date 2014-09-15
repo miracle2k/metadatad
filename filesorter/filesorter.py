@@ -19,7 +19,9 @@ a (maybe fake) video file.
 
 import sys
 import os
+import re
 from os import path
+from collections import namedtuple
 import logging
 from subprocess import Popen, PIPE
 import urllib, urllib2
@@ -30,23 +32,21 @@ from parser import NameParser, InvalidNameException
 
 log = logging.getLogger('torrent-postprocess')
 
-config = __import__('config').config
+config = {
+    #'logfile': '/tmp/torrent.log',
+    #'tv-dir': '',
+    #'manual-dir': '',  # for videos not processible as a TV episode
+    'dryrun': False,
+    'log-level': logging.INFO,
+    #'prowl-key': '',
+    #'nma-key': '',
+    #'unrar-bin': '',  # can be useful for local dev or non Synology sytems
+}
+try:
+    config.update(__import__('config').config)
+except ImportError:
+    print "Cannot import config.py"
 
-
-class Torrent(object):
-    def __init__(self, id, name, dir, hash):
-        self.id, self.name, self.dir, self.hash = id, name, dir or '', hash
-
-    def __unicode__(self):
-        return "%s (%s)" % (self.path, self.id)
-
-    def __repr__(self):
-        return "<Torrent path=%s, id=%s, hash=%s>" % (
-            repr(self.path), self.id, self.hash)
-
-    @property
-    def path(self):
-        return path.join(self.dir, self.name or '')
 
 
 def get_files(directory):
@@ -73,16 +73,16 @@ def first_part_only(filename):
     return int(m.groups()[0]) == 1
 
 
-def unpack(torrent):
+def unpack(torrent_path):
     """Unpack the torrent as necessary, yield a list of movie files
     we need to process.
     """
-    if path.isfile(torrent.path):
+    if path.isfile(torrent_path):
         log.error('Torrent "%s" is a file, this is currently not supported',
-                  torrent.path)
+                  torrent_path)
 
     else:
-        all_files = list(get_files(torrent.path))
+        all_files = list(get_files(torrent_path))
 
         # Unpack all archives
         rar_files = filter(lambda x: path.splitext(x)[1] == '.rar', all_files)
@@ -98,7 +98,7 @@ def unpack(torrent):
 
         for archive in rar_files:
             log.info('Unpacking archive: %s' % archive)
-            p = Popen([config.get('unrar-bin', '/usr/syno/bin/unrar'), 'x', '-y', archive, torrent.path],
+            p = Popen([config.get('unrar-bin', '/usr/syno/bin/unrar'), 'x', '-y', archive, torrent_path],
                       stdout=PIPE, stderr=PIPE)
             p.wait()
             if p.returncode != 0:
@@ -107,7 +107,7 @@ def unpack(torrent):
                 continue
 
             # Find the files that are new in this archive
-            updated_all_files = list(get_files(torrent.path))
+            updated_all_files = list(get_files(torrent_path))
             added_files = set(updated_all_files) - set(all_files)
             all_files = updated_all_files
             log.debug('Unpack yielded %d new files', len(added_files))
@@ -345,44 +345,65 @@ def send_notification(subject, message):
                 log.error('Cannot send NMA notification: %s', e)
 
 
-def main():
-    # XXX Need to support a non-move mode for torrents that are not compressed.
+# Sucessfully identified and processed file.
+ProcessedFile = namedtuple('ProcessedFile', 'title, filename')
 
+
+def process_path(fspath):
     # Process the torrent
-    torrent = Torrent(**{
-        'id': os.environ.get('TR_TORRENT_ID'),
-        'name': os.environ.get('TR_TORRENT_NAME'),
-        'dir': os.environ.get('TR_TORRENT_DIR'),
-        'hash': os.environ.get('TR_TORRENT_HASH'),
-    })
-
-    # Handle errors that are outright failures, no notification at
-    # all are sent in those cases.
-    if not torrent.path:
-        log.error("No torrent given via environment. This script "+
-                  "is to be called by Transmission.")
-        return 1
-    if not path.exists(torrent.path):
-        log.error('Given torrent path "%s" does not exist' % torrent.path)
-        return 1
-
-    # Process the torrent
-    log.info('Asked to process torrent "%s"' % torrent)
+    log.info('Asked to process path "%s"' % fspath)
     tvepisodes, other_videos, failed = [], [], []
-    for file in unpack(torrent):
+    files = unpack(fspath)
+
+    for file in files:
         episode, filename = process_video(file)
         if episode:
-            tvepisodes.append(episode)
+            tvepisodes.append(ProcessedFile(episode, filename))
         elif filename:
             other_videos.append(path.basename(filename))
         else:
             failed.append(file)
 
+    # Delete empty directories
+    if path.isdir(fspath) and os.listdir(fspath) == []:
+        os.rmdir(fspath)
+
+    # TODO
+    #clear()
+    #clear_old()
+
+    return tvepisodes, other_videos, failed
+
+
+def main():
+    # XXX Need to support a non-move mode for torrents that are not compressed.
+
+    # Process the torrent
+    torrent = dict(**{
+        'id': os.environ.get('TR_TORRENT_ID'),
+        'name': os.environ.get('TR_TORRENT_NAME'),
+        'dir': os.environ.get('TR_TORRENT_DIR'),
+        'hash': os.environ.get('TR_TORRENT_HASH'),
+    })
+    torrent_path = path.join(torrent['dir'], torrent['name'] or '')
+
+    # Handle errors that are outright failures, no notification at
+    # all are sent in those cases.
+    if not torrent_path:
+        log.error("No torrent given via environment. This script "+
+                  "is to be called by Transmission.")
+        return 1
+    if not path.exists(torrent_path):
+        log.error('Given torrent path "%s" does not exist' % torrent_path)
+        return 1
+
+    tvepisodes, other_videos, failed = process_path(torrent_path)
+
     if not tvepisodes and not other_videos:
         if not failed:
             # Extra message when we cannot even find a single video to process
             log.info('No video files found')
-        send_notification('Download complete', torrent.name)
+        send_notification('Download complete', torrent['name'])
     else:
         if tvepisodes and other_videos:
             subject = 'New Episodes/Videos'
@@ -395,13 +416,6 @@ def main():
             message += " and %d unknown" % len(failed)
         send_notification(subject, message)
 
-    # Delete empty directories
-    if path.isdir(torrent.path) and os.listdir(torrent.path) == []:
-        os.rmdir(torrent.path)
-
-    # TODO
-    #clear()
-    #clear_old()
 
 
 def main_wrapper(*a, **kw):
