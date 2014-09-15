@@ -3,8 +3,10 @@ import os, sys
 from os import path
 import logging
 import pytest
+import mock
 from py.path import local
-from filesorter import process_path, config, log
+import filesorter
+from filesorter import process_path, config, log, generic_main
 
 
 log.addHandler(logging.StreamHandler(sys.stdout))
@@ -39,6 +41,17 @@ def setup(request, tmpdir):
     return setup_maker
 
 
+@pytest.fixture()
+def notifications(request):
+    """Mock the notification sending."""
+    patcher = mock.patch('filesorter.filesorter.send_notification')
+    patcher.__enter__()
+    def close():
+        patcher.__exit__()
+    request.addfinalizer(close)
+    return filesorter.send_notification
+
+
 def test_agressive_sampler(setup):
     """If the input file contains both the proper video and a sample, we
     need to be sure we sort the real file.
@@ -48,7 +61,6 @@ def test_agressive_sampler(setup):
         u'sampside.er.s02e05.episode.title.72ts.720p.hds.720p.hdtv.x264-bwb-s.mkv',
         (u'show.title.S02E05.episode.title.720p.HDTV.x264-BWB-s.mkv', 2),
     ])
-
     tv_episodes, other_vids, failed = process_path(indir.strpath)
 
     assert other_vids == []
@@ -56,3 +68,13 @@ def test_agressive_sampler(setup):
     assert len(tv_episodes) == 1
     assert local(tv_episodes[0].filename).readlines()[0].strip() == \
         'show.title.S02E05.episode.title.720p.HDTV.x264-BWB.mkv'
+
+
+class TestNotification(object):
+
+    def test_send(self, setup, notifications):
+        indir, outdir = setup('show title', [
+            u'show.title.S02E05.episode.title.720p.HDTV.x264-BWB.mkv',
+        ])
+        generic_main(indir.strpath, 'some title here')
+        assert notifications.mock_calls == [mock.call('New Episode', u'show title - 2x05')]

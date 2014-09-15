@@ -387,6 +387,28 @@ def process_path(fspath):
     return tvepisodes, other_videos, failed
 
 
+def generic_main(torrent_path, name):
+    """Transmission specific code should become separate."""
+    tvepisodes, other_videos, failed = process_path(torrent_path)
+
+    if not tvepisodes and not other_videos:
+        if not failed:
+            # Extra message when we cannot even find a single video to process
+            log.info('No video files found')
+        send_notification('Download complete', name)
+    else:
+        if tvepisodes and other_videos:
+            subject = 'New Episodes/Videos'
+        elif tvepisodes:
+            subject = 'New Episodes' if len(tvepisodes)+len(failed)>1 else 'New Episode'
+        elif other_videos:
+            subject = 'New Videos' if len(other_videos)+len(failed)>1 else 'New Video'
+        message = ", ".join([e.title for e in tvepisodes]+other_videos)
+        if failed:
+            message += " and %d unknown" % len(failed)
+        send_notification(subject, message)
+
+
 def main():
     # XXX Need to support a non-move mode for torrents that are not compressed.
 
@@ -409,25 +431,7 @@ def main():
         log.error('Given torrent path "%s" does not exist' % torrent_path)
         return 1
 
-    tvepisodes, other_videos, failed = process_path(torrent_path)
-
-    if not tvepisodes and not other_videos:
-        if not failed:
-            # Extra message when we cannot even find a single video to process
-            log.info('No video files found')
-        send_notification('Download complete', torrent['name'])
-    else:
-        if tvepisodes and other_videos:
-            subject = 'New Episodes/Videos'
-        elif tvepisodes:
-            subject = 'New Episodes' if len(tvepisodes)+len(failed)>1 else 'New Episode'
-        elif other_videos:
-            subject = 'New Videos' if len(other_videos)+len(failed)>1 else 'New Video'
-        message = ", ".join(tvepisodes+other_videos)
-        if failed:
-            message += " and %d unknown" % len(failed)
-        send_notification(subject, message)
-
+    generic_main(torrent_path, torrent['name'])
 
 
 def main_wrapper(*a, **kw):
