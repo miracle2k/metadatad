@@ -242,7 +242,7 @@ def find_tv_episode_target_filename(show, file):
         return None, None
 
 
-def process_video(file):
+def process_video(file, already_found_episodes):
     """Rename video file and move to target folder.
 
     Returns a 2-tuple (episode title, final file location). The first
@@ -271,6 +271,9 @@ def process_video(file):
         target_file = path.join(config['manual-dir'], folder, filename)
 
     if not target_file:
+        return None, None
+
+    if target_file in [e.filename for e in already_found_episodes]:
         return None, None
 
     # Actually move the file
@@ -355,8 +358,17 @@ def process_path(fspath):
     tvepisodes, other_videos, failed = [], [], []
     files = unpack(fspath)
 
+    # We may have discovered multiple files, and frequently, there are
+    # two files that based on our routing logic would result in the same
+    # filename; in such a case, one is generally a sample and the other
+    # is the actual file. So:
+    #   1. Sort by file size
+    #   2. Process large files first
+    #   3. Never overwrite within one processing "job".
+    files = sorted(files, key=os.path.getsize, reverse=True)
+
     for file in files:
-        episode, filename = process_video(file)
+        episode, filename = process_video(file, tvepisodes)
         if episode:
             tvepisodes.append(ProcessedFile(episode, filename))
         elif filename:
